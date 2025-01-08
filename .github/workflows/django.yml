@@ -1,31 +1,50 @@
-name: Django CI
+name: Deploy Django Project
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - main  # Выполнять при пуше в ветку main
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 4
-      matrix:
-        python-version: [3.11]
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3  # Используем только одну версию setup-python
+    # 1. Checkout репозитория
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    # 2. Установить SSH-ключ для доступа к серверу
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.3
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install Dependencies
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # Добавьте SSH-ключ в Secrets репозитория
+
+    # 3. Выполнить команды на удалённом сервере
+    - name: Deploy on Server
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    - name: Run Migrations
-      run: |
-        python manage.py makemigrations  # Создаем миграции, если их нет
-        python manage.py migrate         # Применяем миграции
-        
+        ssh -o StrictHostKeyChecking=no ubuntu@185.22.67.9 << 'EOF'
+          # Перейти в директорию проекта
+          cd /var/www/workflow
+
+          # 1. Обновить код из репозитория
+          git pull origin main
+
+          # 2. Активировать виртуальное окружение
+          source venv/bin/activate
+
+          # 3. Установить зависимости
+          pip install -r requirements.txt
+
+          # 4. Применить миграции базы данных
+          python manage.py migrate
+
+          # 5. Собрать статические файлы
+          python manage.py collectstatic --noinput
+
+          # 6. Перезапустить Gunicorn
+          sudo systemctl restart myproject
+
+          # 7. Перезагрузить Nginx (если нужно)
+          sudo systemctl reload nginx
+        EOF
